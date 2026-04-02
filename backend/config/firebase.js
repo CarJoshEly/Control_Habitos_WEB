@@ -1,12 +1,10 @@
 import admin from 'firebase-admin';
-import { createRequire } from 'module';
 
-const require = createRequire(import.meta.url);
-const serviceAccount = require('./serviceAccountKey.json');
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
-  storageBucket: 'tu-proyecto.appspot.com'
+  storageBucket: 'control-habitos1.firebasestorage.app'
 });
 
 const db = admin.firestore();
