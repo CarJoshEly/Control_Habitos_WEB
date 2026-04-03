@@ -4,6 +4,21 @@ import verifyToken from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
+const ZAPIER_HABIT_WEBHOOK = process.env.ZAPIER_HABIT_WEBHOOK;
+
+const sendToZapier = async (url, data) => {
+  if (!url) return;
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  } catch (e) {
+    console.error('Error enviando a Zapier:', e.message);
+  }
+};
+
 // Obtener todos los hábitos del usuario
 router.get('/', verifyToken, async (req, res) => {
   try {
@@ -132,6 +147,18 @@ router.patch('/:id/toggle', verifyToken, async (req, res) => {
       bestStreak,
       lastCompleted: completed ? new Date() : data.lastCompleted,
     });
+
+    // Notificar a Zapier cuando se completa un hábito
+    if (completed) {
+      await sendToZapier(ZAPIER_HABIT_WEBHOOK, {
+        habitName: data.name,
+        date,
+        streak,
+        progress,
+        userId: req.user.uid,
+        email: req.user.email,
+      });
+    }
 
     res.json({ message: 'Hábito actualizado', streak, progress });
   } catch (error) {

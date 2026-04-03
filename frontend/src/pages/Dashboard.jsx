@@ -2,13 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { logout } from '../services/authService'
-import {
-  getHabits,
-  createHabit,
-  updateHabit,
-  deleteHabit,
-  toggleHabit,
-} from '../services/habitService'
+import { getHabits, createHabit, updateHabit, deleteHabit, toggleHabit } from '../services/habitService'
+import { useTheme } from '../context/ThemeContext'
 
 const DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
 const MONTHS = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
@@ -24,151 +19,195 @@ const isFuture = (d) => {
   const today = new Date(); today.setHours(23,59,59,999)
   return new Date(d) > today
 }
+const pad = (n) => String(n).padStart(2, '0')
 
-function HabitModal({ habit, onClose, onSave }) {
+// ─── TimePicker ────────────────────────────────────────────────────────────────
+function TimePicker({ hour, minute, onChange, onClose, dark }) {
+  const to12 = (h) => ({ h: h % 12 === 0 ? 12 : h % 12, period: h < 12 ? 'AM' : 'PM' })
+  const to24 = (h, period) => period === 'AM' ? (h === 12 ? 0 : h) : (h === 12 ? 12 : h + 12)
+  const init = to12(hour ?? 8)
+  const [h, setH] = useState(init.h)
+  const [min, setMin] = useState(minute ?? 0)
+  const [period, setPeriod] = useState(init.period)
+  const adjH = (delta) => setH(v => ((v - 1 + delta + 12) % 12) + 1)
+  const adjMin = (delta) => setMin(v => (v + delta + 60) % 60)
+  const handleHInput = (val) => { const n = parseInt(val); if (!isNaN(n) && n >= 1 && n <= 12) setH(n) }
+  const handleMinInput = (val) => { const n = parseInt(val); if (!isNaN(n) && n >= 0 && n <= 59) setMin(n) }
+  const bg = dark ? '#1e293b' : 'white'
+  const inputBg = dark ? '#0f172a' : '#f0f4ff'
+  const btnBg = dark ? '#334155' : '#f0f4ff'
+
+  return (
+    <div style={{ ...m.overlay, zIndex: 1100 }} onClick={onClose}>
+      <div style={{ ...m.timePicker, backgroundColor: bg }} onClick={e => e.stopPropagation()}>
+        <div style={m.timeHeader}>
+          <span style={{ fontSize: 20 }}>⏰</span>
+          <span style={{ fontWeight: 700, color: '#003087', fontSize: 17 }}>Seleccionar hora</span>
+        </div>
+        <div style={{ ...m.timeDisplay, background: inputBg }}>
+          <input type="number" min={1} max={12} value={h} onChange={e => handleHInput(e.target.value)} style={{ ...m.timeInput, color: dark ? '#93c5fd' : '#003087' }} />
+          <span style={{ ...m.timeSep, color: dark ? '#93c5fd' : '#003087' }}>:</span>
+          <input type="number" min={0} max={59} value={pad(min)} onChange={e => handleMinInput(e.target.value)} style={{ ...m.timeInput, color: dark ? '#93c5fd' : '#003087' }} />
+        </div>
+        <div style={m.timeControls}>
+          <div style={m.timeCol}>
+            <button style={{ ...m.timeArrow, background: btnBg, color: dark ? '#93c5fd' : '#003087' }} onClick={() => adjH(1)}>▲</button>
+            <div style={{ ...m.timeLabel, color: dark ? '#94a3b8' : '#9ca3af' }}>Hora</div>
+            <button style={{ ...m.timeArrow, background: btnBg, color: dark ? '#93c5fd' : '#003087' }} onClick={() => adjH(-1)}>▼</button>
+          </div>
+          <div style={{ width: 32 }} />
+          <div style={m.timeCol}>
+            <button style={{ ...m.timeArrow, background: btnBg, color: dark ? '#93c5fd' : '#003087' }} onClick={() => adjMin(1)}>▲</button>
+            <div style={{ ...m.timeLabel, color: dark ? '#94a3b8' : '#9ca3af' }}>Minutos</div>
+            <button style={{ ...m.timeArrow, background: btnBg, color: dark ? '#93c5fd' : '#003087' }} onClick={() => adjMin(-1)}>▼</button>
+          </div>
+          <div style={{ width: 24 }} />
+          <div style={m.timeCol}>
+            <button style={{ ...m.timeArrow, background: period === 'AM' ? '#003087' : btnBg, color: period === 'AM' ? 'white' : (dark ? '#93c5fd' : '#003087') }} onClick={() => setPeriod('AM')}>AM</button>
+            <div style={{ ...m.timeLabel, color: dark ? '#94a3b8' : '#9ca3af' }}>Período</div>
+            <button style={{ ...m.timeArrow, background: period === 'PM' ? '#003087' : btnBg, color: period === 'PM' ? 'white' : (dark ? '#93c5fd' : '#003087') }} onClick={() => setPeriod('PM')}>PM</button>
+          </div>
+        </div>
+        <div style={m.actions}>
+          <button style={{ ...m.cancelBtn, background: dark ? '#334155' : 'white', color: dark ? '#e2e8f0' : '#374151', border: dark ? '1px solid #475569' : '1px solid #e0e0e0' }} onClick={onClose}>Cancelar</button>
+          <button style={m.saveBtn} onClick={() => onChange(to24(h, period), min)}>Confirmar</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── HabitModal ────────────────────────────────────────────────────────────────
+function HabitModal({ habit, onClose, onSave, dark }) {
   const editing = !!habit?.id
   const [name, setName] = useState(habit?.name || '')
   const [description, setDescription] = useState(habit?.description || '')
   const [frequency, setFrequency] = useState(habit?.frequency || 'daily')
-  const [reminderHour, setReminderHour] = useState(habit?.reminderHour ?? '')
-  const [reminderMinute, setReminderMinute] = useState(habit?.reminderMinute ?? '')
+  const [reminderHour, setReminderHour] = useState(habit?.reminderHour ?? null)
+  const [reminderMinute, setReminderMinute] = useState(habit?.reminderMinute ?? null)
+  const [showTimePicker, setShowTimePicker] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const hasReminder = reminderHour !== null
+  const bg = dark ? '#1e293b' : 'white'
+  const inputStyle = { ...m.input, background: dark ? '#0f172a' : 'white', color: dark ? '#e2e8f0' : '#111827', border: dark ? '1px solid #334155' : '1px solid #e0e0e0' }
 
   const handleSave = async () => {
     if (!name.trim()) { setError('El nombre es requerido'); return }
     setLoading(true)
-    const data = {
-      name: name.trim(),
-      description: description.trim(),
-      frequency,
-      reminderHour: reminderHour !== '' ? parseInt(reminderHour) : null,
-      reminderMinute: reminderMinute !== '' ? parseInt(reminderMinute) : null,
-    }
-    await onSave(data)
+    await onSave({ name: name.trim(), description: description.trim(), frequency, reminderHour: hasReminder ? reminderHour : null, reminderMinute: hasReminder ? reminderMinute : null })
     setLoading(false)
   }
 
   return (
-    <div style={m.overlay} onClick={onClose}>
-      <div style={m.modal} onClick={e => e.stopPropagation()}>
-        <div style={m.modalHeader}>
-          <span style={m.modalIcon}>{editing ? '✏️' : '➕'}</span>
-          <h2 style={m.modalTitle}>{editing ? 'Editar Hábito' : 'Nuevo Hábito'}</h2>
-        </div>
-
-        {error && <div style={m.error}>{error}</div>}
-
-        <div style={m.field}>
-          <label style={m.label}>Nombre *</label>
-          <input
-            style={m.input}
-            value={name}
-            onChange={e => setName(e.target.value)}
-            placeholder="Ej. Hacer ejercicio"
-            autoFocus
-          />
-        </div>
-
-        <div style={m.field}>
-          <label style={m.label}>Descripción</label>
-          <textarea
-            style={{ ...m.input, minHeight: 70, resize: 'vertical' }}
-            value={description}
-            onChange={e => setDescription(e.target.value)}
-            placeholder="Ej. 30 minutos de cardio"
-          />
-        </div>
-
-        <div style={m.field}>
-          <label style={m.label}>Frecuencia</label>
-          <select style={m.input} value={frequency} onChange={e => setFrequency(e.target.value)}>
-            <option value="daily">📅 Diario</option>
-            <option value="weekly">📆 Semanal</option>
-            <option value="monthly">🗓️ Mensual</option>
-          </select>
-        </div>
-
-        <div style={m.field}>
-          <label style={m.label}>⏰ Recordatorio (opcional)</label>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              style={{ ...m.input, width: '50%' }}
-              type="number"
-              min="0" max="23"
-              placeholder="Hora (0-23)"
-              value={reminderHour}
-              onChange={e => setReminderHour(e.target.value)}
-            />
-            <input
-              style={{ ...m.input, width: '50%' }}
-              type="number"
-              min="0" max="59"
-              placeholder="Minuto (0-59)"
-              value={reminderMinute}
-              onChange={e => setReminderMinute(e.target.value)}
-            />
+    <>
+      <div style={m.overlay} onClick={onClose}>
+        <div style={{ ...m.modal, backgroundColor: bg }} onClick={e => e.stopPropagation()}>
+          <div style={m.modalHeader}>
+            <span style={m.modalIcon}>{editing ? '✏️' : '➕'}</span>
+            <h2 style={{ ...m.modalTitle, color: dark ? '#93c5fd' : '#003087' }}>{editing ? 'Editar Hábito' : 'Nuevo Hábito'}</h2>
+          </div>
+          {error && <div style={m.error}>{error}</div>}
+          <div style={m.field}>
+            <label style={{ ...m.label, color: dark ? '#94a3b8' : '#374151' }}>Nombre *</label>
+            <input style={inputStyle} value={name} onChange={e => setName(e.target.value)} placeholder="Ej. Hacer ejercicio" autoFocus />
+          </div>
+          <div style={m.field}>
+            <label style={{ ...m.label, color: dark ? '#94a3b8' : '#374151' }}>Descripción</label>
+            <textarea style={{ ...inputStyle, minHeight: 72, resize: 'vertical' }} value={description} onChange={e => setDescription(e.target.value)} placeholder="Ej. 30 minutos de cardio" />
+          </div>
+          <div style={m.field}>
+            <label style={{ ...m.label, color: dark ? '#94a3b8' : '#374151' }}>Frecuencia</label>
+            <select style={inputStyle} value={frequency} onChange={e => setFrequency(e.target.value)}>
+              <option value="daily">📅 Diario</option>
+              <option value="weekly">📆 Semanal</option>
+              <option value="monthly">🗓️ Mensual</option>
+            </select>
+          </div>
+          <div style={m.field}>
+            <label style={{ ...m.label, color: dark ? '#94a3b8' : '#374151' }}>Recordatorio</label>
+            <div style={{ ...m.reminderTile, background: dark ? '#0f172a' : 'white', border: dark ? '1px solid #334155' : '1px solid #e0e0e0' }} onClick={() => setShowTimePicker(true)}>
+              <div style={{ fontSize: 26 }}>{hasReminder ? '🔔' : '🔕'}</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: hasReminder ? '#003087' : (dark ? '#e2e8f0' : '#374151') }}>
+                  {hasReminder ? `Recordatorio: ${pad(reminderHour)}:${pad(reminderMinute)}` : 'Agregar recordatorio'}
+                </div>
+                <div style={{ fontSize: 12, color: dark ? '#64748b' : '#9ca3af', marginTop: 2 }}>
+                  {hasReminder ? 'Toca para cambiar la hora' : 'Opcional — toca para configurar'}
+                </div>
+              </div>
+              {hasReminder
+                ? <button style={m.clearBtn} onClick={e => { e.stopPropagation(); setReminderHour(null); setReminderMinute(null) }}>✕</button>
+                : <span style={{ color: dark ? '#64748b' : '#9ca3af', fontSize: 22 }}>›</span>
+              }
+            </div>
+          </div>
+          <div style={m.actions}>
+            <button style={{ ...m.cancelBtn, background: dark ? '#334155' : 'white', color: dark ? '#e2e8f0' : '#374151', border: dark ? '1px solid #475569' : '1px solid #e0e0e0' }} onClick={onClose}>Cancelar</button>
+            <button style={m.saveBtn} onClick={handleSave} disabled={loading}>{loading ? 'Guardando...' : editing ? 'Guardar' : 'Crear'}</button>
           </div>
         </div>
-
-        <div style={m.actions}>
-          <button style={m.cancelBtn} onClick={onClose}>Cancelar</button>
-          <button style={m.saveBtn} onClick={handleSave} disabled={loading}>
-            {loading ? 'Guardando...' : editing ? 'Guardar' : 'Crear'}
-          </button>
-        </div>
       </div>
-    </div>
+      {showTimePicker && (
+        <TimePicker dark={dark} hour={reminderHour ?? 8} minute={reminderMinute ?? 0}
+          onChange={(h, min) => { setReminderHour(h); setReminderMinute(min); setShowTimePicker(false) }}
+          onClose={() => setShowTimePicker(false)} />
+      )}
+    </>
   )
 }
 
-function ConfirmModal({ name, onClose, onConfirm }) {
+// ─── ConfirmModal ──────────────────────────────────────────────────────────────
+function ConfirmModal({ name, onClose, onConfirm, dark }) {
   return (
     <div style={m.overlay} onClick={onClose}>
-      <div style={{ ...m.modal, maxWidth: 380 }} onClick={e => e.stopPropagation()}>
-        <div style={{ textAlign: 'center', marginBottom: 16 }}>
-          <div style={{ fontSize: 48 }}>⚠️</div>
-          <h2 style={{ color: '#003087', margin: '8px 0' }}>¿Eliminar hábito?</h2>
-          <p style={{ color: '#666' }}>Se eliminará <strong>"{name}"</strong> permanentemente.</p>
+      <div style={{ ...m.modal, maxWidth: 360, backgroundColor: dark ? '#1e293b' : 'white' }} onClick={e => e.stopPropagation()}>
+        <div style={{ textAlign: 'center', marginBottom: 20 }}>
+          <div style={{ fontSize: 52 }}>⚠️</div>
+          <h2 style={{ color: dark ? '#93c5fd' : '#003087', margin: '10px 0 6px' }}>¿Eliminar hábito?</h2>
+          <p style={{ color: dark ? '#94a3b8' : '#666', margin: 0 }}>Se eliminará <strong>"{name}"</strong> permanentemente.</p>
         </div>
         <div style={m.actions}>
-          <button style={m.cancelBtn} onClick={onClose}>Cancelar</button>
-          <button style={{ ...m.saveBtn, backgroundColor: '#dc2626' }} onClick={onConfirm}>Eliminar</button>
+          <button style={{ ...m.cancelBtn, background: dark ? '#334155' : 'white', color: dark ? '#e2e8f0' : '#374151', border: dark ? '1px solid #475569' : '1px solid #e0e0e0' }} onClick={onClose}>Cancelar</button>
+          <button style={{ ...m.saveBtn, background: '#dc2626' }} onClick={onConfirm}>Eliminar</button>
         </div>
       </div>
     </div>
   )
 }
 
-function HabitCard({ habit, selectedDate, onToggle, onEdit, onDelete, onProgress, onHistory }) {
+// ─── HabitCard ─────────────────────────────────────────────────────────────────
+function HabitCard({ habit, selectedDate, onToggle, onEdit, onDelete, onProgress, onHistory, dark }) {
   const history = habit.completionHistory || []
   const dateStr = toDateStr(selectedDate)
   const completed = history.includes(dateStr)
   const isPast = !isFuture(selectedDate)
   const [menuOpen, setMenuOpen] = useState(false)
+  const cardBg = dark ? (completed ? '#134e26' : '#1e293b') : (completed ? '#f0fdf4' : 'white')
+  const cardBorder = completed ? '2px solid #16a34a' : (dark ? '2px solid #334155' : '2px solid transparent')
 
   return (
-    <div style={{ ...c.card, ...(completed ? c.cardDone : {}) }}>
-      <div style={c.cardTop}>        <button
-          style={{ ...c.checkbox, ...(completed ? c.checkboxDone : {}), ...((!isPast) ? { opacity: 0.4, cursor: 'not-allowed' } : {}) }}
+    <div style={{ ...c.card, backgroundColor: cardBg, border: cardBorder }}>
+      <div style={c.cardTop}>
+        <button
+          style={{ ...c.checkbox, ...(completed ? c.checkboxDone : { border: dark ? '2px solid #475569' : '2px solid #d1d5db', background: dark ? '#0f172a' : 'white' }), ...(!isPast ? { opacity: 0.4, cursor: 'not-allowed' } : {}) }}
           onClick={() => isPast && onToggle(habit.id, !completed, dateStr)}
           disabled={!isPast}
-          title={!isPast ? 'No puedes marcar fechas futuras' : ''}
         >
           {completed ? '✓' : ''}
         </button>
         <div style={c.cardInfo}>
-          <div style={c.cardName(completed)}>{habit.name}</div>
-          {habit.description && <div style={c.cardDesc}>{habit.description}</div>}
+          <div style={{ ...c.cardName(completed), color: completed ? '#6b7280' : (dark ? '#e2e8f0' : '#111827') }}>{habit.name}</div>
+          {habit.description && <div style={{ ...c.cardDesc, color: dark ? '#94a3b8' : '#6b7280' }}>{habit.description}</div>}
         </div>
         <div style={{ position: 'relative' }}>
-          <button style={c.menuBtn} onClick={() => setMenuOpen(v => !v)}>⋮</button>
+          <button style={{ ...c.menuBtn, color: dark ? '#64748b' : '#6b7280' }} onClick={() => setMenuOpen(v => !v)}>⋮</button>
           {menuOpen && (
-            <div style={c.dropdown} onMouseLeave={() => setMenuOpen(false)}>
-              <button style={c.dropItem} onClick={() => { setMenuOpen(false); onEdit(habit) }}>✏️ Editar</button>
-              <button style={c.dropItem} onClick={() => { setMenuOpen(false); onProgress(habit) }}>📊 Progreso</button>
-              <button style={c.dropItem} onClick={() => { setMenuOpen(false); onHistory(habit) }}>📋 Historial</button>
-              <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #eee' }} />
+            <div style={{ ...c.dropdown, backgroundColor: dark ? '#1e293b' : 'white', border: dark ? '1px solid #334155' : '1px solid #f3f4f6' }} onMouseLeave={() => setMenuOpen(false)}>
+              <button style={{ ...c.dropItem, color: dark ? '#e2e8f0' : '#374151' }} onClick={() => { setMenuOpen(false); onEdit(habit) }}>✏️ Editar</button>
+              <button style={{ ...c.dropItem, color: dark ? '#e2e8f0' : '#374151' }} onClick={() => { setMenuOpen(false); onProgress(habit) }}>📊 Progreso</button>
+              <button style={{ ...c.dropItem, color: dark ? '#e2e8f0' : '#374151' }} onClick={() => { setMenuOpen(false); onHistory(habit) }}>📋 Historial</button>
+              <hr style={{ margin: '4px 0', border: 'none', borderTop: dark ? '1px solid #334155' : '1px solid #f3f4f6' }} />
               <button style={{ ...c.dropItem, color: '#dc2626' }} onClick={() => { setMenuOpen(false); onDelete(habit) }}>🗑️ Eliminar</button>
             </div>
           )}
@@ -176,26 +215,41 @@ function HabitCard({ habit, selectedDate, onToggle, onEdit, onDelete, onProgress
       </div>
       <div style={c.chips}>
         <span style={c.chip('#fff7ed', '#ea580c')}>🔥 {habit.streak || 0} días</span>
-        <span style={c.chip('#f0fdf4', '#16a34a')}>✓ {habit.progress || 0} total</span>
+        <span style={c.chip('#f0fdf4', '#16a34a')}>✓ {habit.progress || 0}</span>
         {habit.reminderHour != null && (
-          <span style={c.chip('#eff6ff', '#2563eb')}>
-            ⏰ {String(habit.reminderHour).padStart(2,'0')}:{String(habit.reminderMinute||0).padStart(2,'0')}
-          </span>
+          <span style={c.chip('#eff6ff', '#2563eb')}>⏰ {pad(habit.reminderHour)}:{pad(habit.reminderMinute || 0)}</span>
         )}
-        <span style={{ ...c.chip('#f8fafc', '#64748b'), marginLeft: 'auto' }}>
-          {FREQ_LABELS[habit.frequency] || habit.frequency}
-        </span>
+        <span style={{ ...c.chip('#f1f5f9', '#64748b'), marginLeft: 'auto' }}>{FREQ_LABELS[habit.frequency] || habit.frequency}</span>
       </div>
     </div>
   )
 }
 
-function StatsTab({ habits }) {
+// ─── StatsTab ──────────────────────────────────────────────────────────────────
+function StatCard({ icon, label, value, color, dark }) {
+  return (
+    <div style={{ ...s.statCard, backgroundColor: dark ? '#1e293b' : 'white' }}>
+      <div style={{ fontSize: 32 }}>{icon}</div>
+      <div style={{ fontSize: 26, fontWeight: 800, color, margin: '8px 0 4px' }}>{value}</div>
+      <div style={{ fontSize: 12, color: dark ? '#94a3b8' : '#6b7280', fontWeight: 500 }}>{label}</div>
+    </div>
+  )
+}
+
+function StatsTab({ habits, dark }) {
   if (!habits.length) return (
-    <div style={s.empty}>
-      <div style={{ fontSize: 64 }}>📊</div>
-      <h3 style={s.emptyTitle}>Sin estadísticas</h3>
-      <p style={s.emptyText}>Crea hábitos para ver tu progreso</p>
+    <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+      <div style={{ fontSize: 80, marginBottom: 16 }}>📊</div>
+      <div style={{
+        background: dark ? 'linear-gradient(135deg, #1e293b, #0f172a)' : 'linear-gradient(135deg, #f0f4ff, #e8eeff)',
+        borderRadius: 20, padding: '32px 24px', maxWidth: 320, margin: '0 auto',
+        border: dark ? '1px solid #334155' : '1px solid #c7d2fe'
+      }}>
+        <h3 style={{ color: dark ? '#93c5fd' : '#003087', margin: '0 0 10px', fontSize: 20 }}>Sin estadísticas aún</h3>
+        <p style={{ color: dark ? '#94a3b8' : '#6b7280', margin: 0, lineHeight: 1.6 }}>
+          Crea hábitos y empieza a completarlos para ver tu progreso aquí 💪
+        </p>
+      </div>
     </div>
   )
 
@@ -204,23 +258,22 @@ function StatsTab({ habits }) {
   const bestStreak = Math.max(...habits.map(h => h.bestStreak || 0), 0)
 
   return (
-    <div style={s.container}>
-      <h3 style={s.sectionTitle}>Resumen General</h3>
+    <div>
+      <h3 style={{ ...s.sectionTitle, color: dark ? '#93c5fd' : '#003087' }}>Resumen General</h3>
       <div style={s.grid}>
-        <StatCard icon="❤️" label="Hábitos Activos" value={habits.length} color="#ec4899" />
-        <StatCard icon="✅" label="Total Completados" value={totalCompleted} color="#16a34a" />
-        <StatCard icon="🔥" label="Racha Combinada" value={`${totalStreak} días`} color="#ea580c" />
-        <StatCard icon="🏆" label="Mejor Racha" value={`${bestStreak} días`} color="#d97706" />
+        <StatCard dark={dark} icon="❤️" label="Hábitos Activos" value={habits.length} color="#ec4899" />
+        <StatCard dark={dark} icon="✅" label="Total Completados" value={totalCompleted} color="#16a34a" />
+        <StatCard dark={dark} icon="🔥" label="Racha Combinada" value={totalStreak} color="#ea580c" />
+        <StatCard dark={dark} icon="🏆" label="Mejor Racha" value={bestStreak} color="#d97706" />
       </div>
-
-      <h3 style={{ ...s.sectionTitle, marginTop: 32 }}>Progreso por Hábito</h3>
+      <h3 style={{ ...s.sectionTitle, color: dark ? '#93c5fd' : '#003087', marginTop: 28 }}>Por hábito</h3>
       {habits.map(h => (
-        <div key={h.id} style={s.habitRow}>
-          <div style={s.habitRowName}>{h.name}</div>
-          <div style={s.habitRowStats}>
-            <span style={s.miniStat('#16a34a')}>✓ {h.progress || 0}</span>
-            <span style={s.miniStat('#ea580c')}>🔥 {h.streak || 0}</span>
-            <span style={s.miniStat('#d97706')}>🏆 {h.bestStreak || 0}</span>
+        <div key={h.id} style={{ ...s.habitRow, backgroundColor: dark ? '#1e293b' : 'white' }}>
+          <div style={{ fontWeight: 600, color: dark ? '#e2e8f0' : '#111827', fontSize: 15, marginBottom: 8 }}>{h.name}</div>
+          <div style={{ display: 'flex', gap: 16 }}>
+            <span style={{ fontSize: 13, color: '#16a34a', fontWeight: 600 }}>✓ {h.progress || 0}</span>
+            <span style={{ fontSize: 13, color: '#ea580c', fontWeight: 600 }}>🔥 {h.streak || 0}</span>
+            <span style={{ fontSize: 13, color: '#d97706', fontWeight: 600 }}>🏆 {h.bestStreak || 0}</span>
           </div>
         </div>
       ))}
@@ -228,26 +281,17 @@ function StatsTab({ habits }) {
   )
 }
 
-function StatCard({ icon, label, value, color }) {
-  return (
-    <div style={s.statCard}>
-      <div style={{ fontSize: 32 }}>{icon}</div>
-      <div style={{ ...s.statValue, color }}>{value}</div>
-      <div style={s.statLabel}>{label}</div>
-    </div>
-  )
-}
-
-// ─── Main Dashboard
+// ─── Dashboard principal ───────────────────────────────────────────────────────
 export default function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [habits, setHabits] = useState([])
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState('habits') // 'habits' | 'stats'
+  const [tab, setTab] = useState('habits')
   const [selectedDate, setSelectedDate] = useState(new Date())
-  const [modalHabit, setModalHabit] = useState(null) // null=closed, {}=new, {id,...}=edit
+  const [modalHabit, setModalHabit] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const { dark, toggleTheme } = useTheme()
 
   const fetchHabits = useCallback(async () => {
     try {
@@ -259,71 +303,67 @@ export default function Dashboard() {
 
   useEffect(() => { fetchHabits() }, [fetchHabits])
 
-  const handleLogout = async () => {
-    await logout()
-    navigate('/')
-  }
-
+  const handleLogout = async () => { await logout(); navigate('/') }
   const handleSaveHabit = async (data) => {
-    if (modalHabit?.id) {
-      await updateHabit(modalHabit.id, data)
-    } else {
-      await createHabit(data)
-    }
+    if (modalHabit?.id) await updateHabit(modalHabit.id, data)
+    else await createHabit(data)
     setModalHabit(null)
     fetchHabits()
   }
-
   const handleDelete = async () => {
     await deleteHabit(deleteTarget.id)
     setDeleteTarget(null)
     fetchHabits()
   }
-
   const handleToggle = async (id, completed, date) => {
     await toggleHabit(id, completed, date)
     fetchHabits()
   }
 
-  // Generar los últimos 7 días + 7 próximos para el calendario
   const calendarDays = Array.from({ length: 14 }, (_, i) => {
-    const d = new Date()
-    d.setDate(d.getDate() - 7 + i)
-    return d
+    const d = new Date(); d.setDate(d.getDate() - 7 + i); return d
   })
 
   const today = new Date()
   const formattedDate = `${today.getDate()} de ${MONTHS[today.getMonth()]} ${today.getFullYear()}`
+  const pageBg = dark ? '#0f172a' : '#f0f4ff'
+  const calBg = dark ? '#1e293b' : 'white'
+  const calBorder = dark ? '1px solid #334155' : '1px solid #e5e7eb'
 
   return (
-    <div style={d.page}>
+    <div style={{ ...d.page, backgroundColor: pageBg }}>
+      {/* Header */}
       <header style={d.header}>
-        <div style={d.headerLeft}>
-          <span style={d.logo}>🎓</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 28 }}>🎓</span>
           <div>
-            <div style={d.appName}>Control Hábitos</div>
-            <div style={d.unicah}>UNICAH</div>
+            <div style={{ color: 'white', fontWeight: 700, fontSize: 16, lineHeight: 1 }}>Control Hábitos</div>
+            <div style={{ color: '#C8A84B', fontSize: 12, fontWeight: 700 }}>UNICAH</div>
           </div>
         </div>
-        <div style={d.headerRight}>
-          <button style={d.profileBtn} onClick={() => navigate('/profile')} title="Perfil">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {/* Botón de tema */}
+          <button style={d.iconBtn} onClick={toggleTheme} title={dark ? 'Modo claro' : 'Modo oscuro'}>
+            {dark ? '☀️' : '🌙'}
+          </button>
+          <button style={d.profileBtn} onClick={() => navigate('/profile')}>
             {user?.photoURL
-              ? <img src={user.photoURL} alt="perfil" style={d.avatar} />
-              : <span style={d.avatarFallback}>{(user?.displayName || user?.email || 'U')[0].toUpperCase()}</span>
+              ? <img src={user.photoURL} alt="perfil" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              : <span style={{ color: '#C8A84B', fontWeight: 700, fontSize: 16 }}>{(user?.displayName || user?.email || 'U')[0].toUpperCase()}</span>
             }
           </button>
-          <button style={d.aiBtn} onClick={() => navigate('/ai')} title="Asistente IA">🤖</button>
-          <button style={d.logoutBtn} onClick={handleLogout} title="Cerrar sesión">↩</button>
+          <button style={d.iconBtn} onClick={() => navigate('/ai')}>🤖</button>
+          <button style={d.iconBtn} onClick={handleLogout}>↩</button>
         </div>
       </header>
 
+      {/* Greeting */}
       <div style={d.greeting}>
-        <h1 style={d.greetTitle}>
-          Hola, {user?.displayName?.split(' ')[0] || 'Estudiante'} 👋
-        </h1>
-        <p style={d.greetDate}>{formattedDate}</p>
+        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Hola, {user?.displayName?.split(' ')[0] || 'Estudiante'} 👋</h1>
+        <p style={{ margin: '4px 0 0', fontSize: 14, opacity: 0.8 }}>{formattedDate}</p>
       </div>
 
+      {/* Tabs */}
       <div style={d.tabBar}>
         <button style={d.tab(tab === 'habits')} onClick={() => setTab('habits')}>🏠 Mis Hábitos</button>
         <button style={d.tab(tab === 'stats')} onClick={() => setTab('stats')}>📊 Estadísticas</button>
@@ -331,51 +371,54 @@ export default function Dashboard() {
 
       {tab === 'habits' && (
         <>
-          <div style={d.calendarWrap}>
-            <div style={d.calHeader}>
-              <span style={d.calTitle}>
+          {/* Calendario */}
+          <div style={{ ...d.calendarWrap, backgroundColor: calBg, borderBottom: calBorder }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <span style={{ fontWeight: 600, color: dark ? '#93c5fd' : '#003087', fontSize: 15 }}>
                 {DAYS_SHORT[selectedDate.getDay()]}, {selectedDate.getDate()} de {MONTHS[selectedDate.getMonth()]}
               </span>
-              <button style={d.todayBtn} onClick={() => setSelectedDate(new Date())}>Hoy</button>
+              <button style={{ ...d.todayBtn, color: dark ? '#93c5fd' : '#0057B8', border: dark ? '1px solid #93c5fd' : '1px solid #0057B8' }} onClick={() => setSelectedDate(new Date())}>Hoy</button>
             </div>
-            <div style={d.calStrip}>
+            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
               {calendarDays.map((day, i) => {
                 const selected = isSameDay(day, selectedDate)
                 const todayDay = isToday(day)
                 const future = isFuture(day)
                 return (
-                  <button
-                    key={i}
-                    style={d.dayBtn(selected, todayDay, future)}
-                    onClick={() => !future && setSelectedDate(new Date(day))}
-                    disabled={future}
-                  >
-                    <span style={d.dayName(selected, future)}>{DAYS_SHORT[day.getDay()]}</span>
-                    <span style={d.dayNum(selected, future)}>{day.getDate()}</span>
+                  <button key={i} style={d.dayBtn(selected, todayDay, future)}
+                    onClick={() => !future && setSelectedDate(new Date(day))} disabled={future}>
+                    <span style={{ fontSize: 11, color: selected ? 'rgba(255,255,255,0.8)' : future ? '#aaa' : (dark ? '#94a3b8' : '#6b7280') }}>{DAYS_SHORT[day.getDay()]}</span>
+                    <span style={{ fontSize: 20, fontWeight: 700, color: selected ? 'white' : future ? '#aaa' : (dark ? '#e2e8f0' : '#111827') }}>{day.getDate()}</span>
                   </button>
                 )
               })}
             </div>
           </div>
 
-          <div style={d.content}>
+          {/* Lista de hábitos */}
+          <div style={{ padding: '16px 16px 80px' }}>
             {loading ? (
-              <div style={d.center}><div style={d.spinner} /></div>
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+                <div style={d.spinner} />
+              </div>
             ) : habits.length === 0 ? (
-              <div style={d.emptyState}>
-                <div style={{ fontSize: 72, marginBottom: 16 }}>🌱</div>
-                <h3 style={{ color: '#003087', margin: '0 0 8px' }}>¡Bienvenido!</h3>
-                <p style={{ color: '#666', margin: '0 0 24px' }}>Crea tu primer hábito para comenzar</p>
-                <button style={d.addBtnLarge} onClick={() => setModalHabit({})}>
-                  ➕ Crear Hábito
-                </button>
+              <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+                <div style={{ fontSize: 80, marginBottom: 16 }}>🌱</div>
+                <div style={{
+                  background: dark ? 'linear-gradient(135deg, #1e293b, #0f172a)' : 'linear-gradient(135deg, #f0f4ff, #e8eeff)',
+                  borderRadius: 20, padding: '32px 24px', maxWidth: 320, margin: '0 auto',
+                  border: dark ? '1px solid #334155' : '1px solid #c7d2fe'
+                }}>
+                  <h3 style={{ color: dark ? '#93c5fd' : '#003087', margin: '0 0 10px', fontSize: 20 }}>¡Bienvenido!</h3>
+                  <p style={{ color: dark ? '#94a3b8' : '#6b7280', margin: '0 0 24px', lineHeight: 1.6 }}>
+                    Crea tu primer hábito y empieza a construir una mejor versión de ti mismo 💪
+                  </p>
+                  <button style={{ ...d.addBtnLarge, width: '100%' }} onClick={() => setModalHabit({})}>➕ Crear mi primer hábito</button>
+                </div>
               </div>
             ) : (
               habits.map(habit => (
-                <HabitCard
-                  key={habit.id}
-                  habit={habit}
-                  selectedDate={selectedDate}
+                <HabitCard key={habit.id} habit={habit} selectedDate={selectedDate} dark={dark}
                   onToggle={handleToggle}
                   onEdit={(h) => setModalHabit(h)}
                   onDelete={(h) => setDeleteTarget(h)}
@@ -393,113 +436,91 @@ export default function Dashboard() {
       )}
 
       {tab === 'stats' && (
-        <div style={d.content}>
-          <StatsTab habits={habits} />
+        <div style={{ padding: '16px 16px 80px' }}>
+          <StatsTab habits={habits} dark={dark} />
         </div>
       )}
 
       {modalHabit !== null && (
-        <HabitModal
-          habit={modalHabit.id ? modalHabit : null}
-          onClose={() => setModalHabit(null)}
-          onSave={handleSaveHabit}
-        />
+        <HabitModal dark={dark} habit={modalHabit.id ? modalHabit : null} onClose={() => setModalHabit(null)} onSave={handleSaveHabit} />
       )}
       {deleteTarget && (
-        <ConfirmModal
-          name={deleteTarget.name}
-          onClose={() => setDeleteTarget(null)}
-          onConfirm={handleDelete}
-        />
+        <ConfirmModal dark={dark} name={deleteTarget.name} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} />
       )}
     </div>
   )
 }
 
-// Estilos
-
+// ─── Estilos ───────────────────────────────────────────────────────────────────
 const d = {
-  page: { minHeight: '100vh', backgroundColor: '#f0f4ff', fontFamily: 'system-ui, sans-serif', paddingBottom: 80 },
+  page: { minHeight: '100vh', fontFamily: 'system-ui, sans-serif' },
   header: { backgroundColor: '#003087', padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100, boxShadow: '0 2px 8px rgba(0,0,0,0.2)' },
-  headerLeft: { display: 'flex', alignItems: 'center', gap: 10 },
-  logo: { fontSize: 28 },
-  appName: { color: 'white', fontWeight: 'bold', fontSize: 16, lineHeight: 1 },
-  unicah: { color: '#C8A84B', fontSize: 12, fontWeight: 'bold' },
-  headerRight: { display: 'flex', alignItems: 'center', gap: 8 },
-  profileBtn: { background: 'none', border: '2px solid #C8A84B', borderRadius: '50%', width: 38, height: 38, cursor: 'pointer', overflow: 'hidden', padding: 0 },
-  avatar: { width: '100%', height: '100%', objectFit: 'cover' },
-  avatarFallback: { color: '#C8A84B', fontWeight: 'bold', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' },
-  aiBtn: { background: 'rgba(200,168,75,0.2)', border: '1px solid #C8A84B', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 18 },
-  logoutBtn: { background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.3)', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 18, color: 'white' },
-  greeting: { padding: '20px 20px 8px', background: 'linear-gradient(135deg, #003087 0%, #0057B8 100%)', color: 'white' },
-  greetTitle: { margin: 0, fontSize: 22, fontWeight: 700 },
-  greetDate: { margin: '4px 0 0', fontSize: 14, opacity: 0.8 },
-  tabBar: { display: 'flex', backgroundColor: '#0057B8', padding: '0 20px' },
+  profileBtn: { background: 'none', border: '2px solid #C8A84B', borderRadius: '50%', width: 38, height: 38, cursor: 'pointer', overflow: 'hidden', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  iconBtn: { background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, padding: '7px 10px', cursor: 'pointer', fontSize: 17, color: 'white' },
+  greeting: { padding: '20px 20px 16px', background: 'linear-gradient(135deg, #003087 0%, #0057B8 100%)', color: 'white' },
+  tabBar: { display: 'flex', backgroundColor: '#0057B8' },
   tab: (active) => ({ flex: 1, padding: '12px 8px', border: 'none', background: 'none', color: active ? '#C8A84B' : 'rgba(255,255,255,0.7)', fontWeight: active ? 700 : 400, fontSize: 14, cursor: 'pointer', borderBottom: active ? '3px solid #C8A84B' : '3px solid transparent', transition: 'all 0.2s' }),
-  calendarWrap: { backgroundColor: 'white', padding: '16px 20px', borderBottom: '1px solid #e5e7eb' },
-  calHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  calTitle: { fontWeight: 600, color: '#003087', fontSize: 15 },
-  todayBtn: { background: 'none', border: '1px solid #0057B8', color: '#0057B8', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 13 },
-  calStrip: { display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 },
+  calendarWrap: { padding: '16px 20px' },
+  todayBtn: { background: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 13 },
   dayBtn: (selected, today, future) => ({
-    minWidth: 52, height: 64, borderRadius: 12, border: today && !selected ? '2px solid #003087' : '2px solid transparent',
-    background: selected ? '#003087' : 'transparent', cursor: future ? 'not-allowed' : 'pointer',
-    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '0 4px', flexShrink: 0,
-    opacity: future ? 0.4 : 1, transition: 'all 0.15s'
+    minWidth: 52, height: 64, borderRadius: 12,
+    border: today && !selected ? '2px solid #003087' : '2px solid transparent',
+    background: selected ? '#003087' : 'transparent',
+    cursor: future ? 'not-allowed' : 'pointer',
+    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+    gap: 2, padding: '0 4px', flexShrink: 0, opacity: future ? 0.4 : 1, transition: 'all 0.15s'
   }),
-  dayName: (selected, future) => ({ fontSize: 11, color: selected ? 'rgba(255,255,255,0.8)' : future ? '#aaa' : '#6b7280' }),
-  dayNum: (selected, future) => ({ fontSize: 20, fontWeight: 700, color: selected ? 'white' : future ? '#aaa' : '#111827' }),
-  content: { padding: '16px 16px 0' },
-  center: { display: 'flex', justifyContent: 'center', padding: 40 },
   spinner: { width: 40, height: 40, border: '4px solid #e5e7eb', borderTop: '4px solid #003087', borderRadius: '50%', animation: 'spin 0.8s linear infinite' },
-  emptyState: { textAlign: 'center', padding: '60px 20px' },
-  addBtnLarge: { backgroundColor: '#003087', color: 'white', border: 'none', borderRadius: 12, padding: '14px 28px', fontSize: 16, fontWeight: 'bold', cursor: 'pointer' },
-  fab: { position: 'fixed', bottom: 24, right: 24, width: 56, height: 56, borderRadius: '50%', backgroundColor: '#003087', color: 'white', fontSize: 28, border: 'none', cursor: 'pointer', boxShadow: '0 4px 16px rgba(0,48,135,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, transition: 'transform 0.15s', lineHeight: 1 },
+  addBtnLarge: { backgroundColor: '#003087', color: 'white', border: 'none', borderRadius: 12, padding: '14px 28px', fontSize: 16, fontWeight: 700, cursor: 'pointer' },
+  fab: { position: 'fixed', bottom: 24, right: 24, width: 56, height: 56, borderRadius: '50%', backgroundColor: '#003087', color: 'white', fontSize: 28, border: 'none', cursor: 'pointer', boxShadow: '0 4px 16px rgba(0,48,135,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 },
 }
 
 const c = {
-  card: { backgroundColor: 'white', borderRadius: 16, padding: '14px 16px', marginBottom: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.07)', border: '2px solid transparent', transition: 'all 0.2s' },
-  cardDone: { border: '2px solid #16a34a', backgroundColor: '#f0fdf4' },
+  card: { borderRadius: 16, padding: '14px 16px', marginBottom: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.07)', transition: 'all 0.2s' },
+  cardDone: {},
   cardTop: { display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 10 },
-  checkbox: { width: 28, height: 28, borderRadius: 8, border: '2px solid #d1d5db', background: 'white', cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.15s', color: 'white', fontWeight: 'bold' },
+  checkbox: { width: 28, height: 28, borderRadius: 8, cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.15s', color: 'white', fontWeight: 700 },
   checkboxDone: { background: '#16a34a', border: '2px solid #16a34a' },
   cardInfo: { flex: 1, minWidth: 0 },
-  cardName: (done) => ({ fontSize: 16, fontWeight: 600, color: done ? '#6b7280' : '#111827', textDecoration: done ? 'line-through' : 'none', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }),
-  cardDesc: { fontSize: 13, color: '#6b7280', marginTop: 2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' },
-  menuBtn: { background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#6b7280', padding: '0 4px', lineHeight: 1 },
-  dropdown: { position: 'absolute', right: 0, top: '100%', backgroundColor: 'white', borderRadius: 12, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', minWidth: 160, zIndex: 200, overflow: 'hidden', border: '1px solid #f3f4f6' },
-  dropItem: { display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', textAlign: 'left', cursor: 'pointer', fontSize: 14, color: '#374151', transition: 'background 0.1s' },
+  cardName: (done) => ({ fontSize: 16, fontWeight: 600, textDecoration: done ? 'line-through' : 'none', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }),
+  cardDesc: { fontSize: 13, marginTop: 2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' },
+  menuBtn: { background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', padding: '0 4px', lineHeight: 1 },
+  dropdown: { position: 'absolute', right: 0, top: '100%', borderRadius: 12, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', minWidth: 160, zIndex: 200, overflow: 'hidden' },
+  dropItem: { display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', textAlign: 'left', cursor: 'pointer', fontSize: 14 },
   chips: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' },
   chip: (bg, color) => ({ backgroundColor: bg, color, fontSize: 12, fontWeight: 600, padding: '3px 8px', borderRadius: 20 }),
 }
 
 const m = {
   overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 },
-  modal: { backgroundColor: 'white', borderRadius: 20, padding: 28, width: '100%', maxWidth: 460, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' },
+  modal: { borderRadius: 20, padding: 28, width: '100%', maxWidth: 460, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' },
   modalHeader: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 },
   modalIcon: { fontSize: 28 },
-  modalTitle: { color: '#003087', margin: 0, fontSize: 20 },
+  modalTitle: { margin: 0, fontSize: 20 },
   error: { backgroundColor: '#fee2e2', color: '#dc2626', padding: 10, borderRadius: 8, marginBottom: 16, fontSize: 14 },
   field: { marginBottom: 16 },
-  label: { display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 },
-  input: { width: '100%', padding: '11px 14px', borderRadius: 10, border: '1px solid #e0e0e0', fontSize: 14, outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit' },
+  label: { display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 },
+  input: { width: '100%', padding: '11px 14px', borderRadius: 10, fontSize: 14, outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit' },
   actions: { display: 'flex', gap: 10, marginTop: 8 },
-  cancelBtn: { flex: 1, padding: '12px', borderRadius: 10, border: '1px solid #e0e0e0', background: 'white', cursor: 'pointer', fontWeight: 600, fontSize: 15 },
+  cancelBtn: { flex: 1, padding: '12px', borderRadius: 10, cursor: 'pointer', fontWeight: 600, fontSize: 15 },
   saveBtn: { flex: 1, padding: '12px', borderRadius: 10, border: 'none', background: '#003087', color: 'white', cursor: 'pointer', fontWeight: 600, fontSize: 15 },
+  reminderTile: { display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', borderRadius: 12, cursor: 'pointer', transition: 'background 0.15s' },
+  clearBtn: { background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: '#dc2626', padding: '4px 6px', borderRadius: 6 },
+  timePicker: { borderRadius: 20, padding: '28px 32px', width: '100%', maxWidth: 320, boxShadow: '0 20px 60px rgba(0,0,0,0.3)', textAlign: 'center' },
+  timeHeader: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 24 },
+  timeDisplay: { display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 24, borderRadius: 16, padding: '16px 24px' },
+  timeNum: { fontSize: 52, fontWeight: 800, lineHeight: 1, minWidth: 64, textAlign: 'center' },
+  timeSep: { fontSize: 44, fontWeight: 800, margin: '0 4px', lineHeight: 1 },
+  timeControls: { display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: 28 },
+  timeCol: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 },
+  timeArrow: { border: 'none', borderRadius: 10, width: 44, height: 44, fontSize: 18, cursor: 'pointer', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  timeLabel: { fontSize: 12, fontWeight: 600 },
+  timeInput: { fontSize: 52, fontWeight: 800, lineHeight: 1, width: 80, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', fontFamily: 'inherit', MozAppearance: 'textfield' },
 }
 
 const s = {
-  container: { padding: '0 0 20px' },
-  sectionTitle: { fontSize: 18, fontWeight: 700, color: '#003087', margin: '0 0 16px' },
+  sectionTitle: { fontSize: 17, fontWeight: 700, margin: '0 0 16px' },
   grid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 },
-  statCard: { backgroundColor: 'white', borderRadius: 16, padding: 20, textAlign: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.07)' },
-  statValue: { fontSize: 28, fontWeight: 800, margin: '8px 0 4px' },
-  statLabel: { fontSize: 12, color: '#6b7280', fontWeight: 500 },
-  habitRow: { backgroundColor: 'white', borderRadius: 12, padding: '14px 16px', marginBottom: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' },
-  habitRowName: { fontWeight: 600, color: '#111827', fontSize: 15, marginBottom: 8 },
-  habitRowStats: { display: 'flex', gap: 12 },
-  miniStat: (color) => ({ fontSize: 13, color, fontWeight: 600 }),
-  empty: { textAlign: 'center', padding: '60px 20px' },
-  emptyTitle: { fontSize: 20, color: '#003087', margin: '8px 0 4px' },
-  emptyText: { color: '#6b7280', margin: 0 },
+  statCard: { borderRadius: 16, padding: '20px 12px', textAlign: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.07)' },
+  habitRow: { borderRadius: 12, padding: '14px 16px', marginBottom: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' },
 }

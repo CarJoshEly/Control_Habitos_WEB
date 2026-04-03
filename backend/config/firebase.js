@@ -1,6 +1,8 @@
 import admin from 'firebase-admin';
+import { createRequire } from 'module';
 
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+const require = createRequire(import.meta.url);
+const serviceAccount = require('./serviceAccountKey.json');
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -9,6 +11,7 @@ admin.initializeApp({
 
 const db = admin.firestore();
 const auth = admin.auth();
-const bucket = admin.storage().bucket();
+//const bucket = admin.storage().bucket(); se migro a cloudinary
+//export { db, auth, bucket };
 
-export { db, auth, bucket };
+export { db, auth };

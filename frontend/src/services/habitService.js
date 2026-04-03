@@ -1,6 +1,6 @@
 import { getToken } from './authService'
 
-const API = 'http://localhost:3000/api'
+const API = import.meta.env.VITE_API_URL
 
 const getHeaders = async () => {
   const token = await getToken()

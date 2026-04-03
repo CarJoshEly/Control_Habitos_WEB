@@ -3,6 +3,19 @@ import { auth, db } from '../config/firebase.js';
 
 const router = express.Router();
 
+const sendToZapier = async (url, data) => {
+  if (!url) return;
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  } catch (e) {
+    console.error('Error enviando a Zapier:', e.message);
+  }
+};
+
 // Registro
 router.post('/register', async (req, res) => {
   const { email, password, displayName } = req.body;
@@ -23,24 +36,16 @@ router.post('/register', async (req, res) => {
       notificationsEnabled: true,
     });
 
+    // Notificar a Zapier para enviar email de bienvenida
+    await sendToZapier(process.env.ZAPIER_USER_WEBHOOK, {
+      displayName,
+      email,
+      createdAt: new Date().toISOString(),
+    });
+
     res.status(201).json({ message: 'Usuario creado exitosamente', uid: userRecord.uid });
   } catch (error) {
     res.status(400).json({ error: error.message });
-  }
-});
-
-// Obtener datos del usuario
-router.get('/me', async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ error: 'No autorizado' });
-
-  const token = authHeader.split('Bearer ')[1];
-  try {
-    const decoded = await auth.verifyIdToken(token);
-    const userDoc = await db.collection('users').doc(decoded.uid).get();
-    res.json({ uid: decoded.uid, ...userDoc.data() });
-  } catch (error) {
-    res.status(401).json({ error: 'Token inválido' });
   }
 });
 

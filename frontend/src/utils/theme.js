@@ -1,0 +1,16 @@
+export const colors = (dark) => ({
+  pageBg: dark ? '#0f172a' : '#f0f4ff',
+  cardBg: dark ? '#1e293b' : 'white',
+  cardBorder: dark ? '1px solid #334155' : '1px solid #e5e7eb',
+  text: dark ? '#e2e8f0' : '#111827',
+  textMuted: dark ? '#94a3b8' : '#6b7280',
+  textLabel: dark ? '#94a3b8' : '#374151',
+  accent: dark ? '#93c5fd' : '#003087',
+  inputBg: dark ? '#0f172a' : 'white',
+  inputBorder: dark ? '1px solid #334155' : '1px solid #e0e0e0',
+  divider: dark ? '#334155' : '#f3f4f6',
+  btnSecBg: dark ? '#334155' : 'white',
+  btnSecColor: dark ? '#e2e8f0' : '#374151',
+  btnSecBorder: dark ? '1px solid #475569' : '1px solid #e0e0e0',
+  shadowCard: dark ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.07)',
+})
