@@ -109,13 +109,21 @@ Los hábitos pueden ser tanto universitarios (estudio, clases, tareas) como pers
 });
 
 // Chat motivacional
+// Chat motivacional
 router.post('/chat', verifyToken, async (req, res) => {
   const { mensaje, historial } = req.body;
 
   if (!mensaje) return res.status(400).json({ error: 'El mensaje es requerido' });
 
   try {
-    const messages = [{ role: 'system', content: systemContext }];
+    const now = new Date();
+    const today = now.toLocaleDateString('es-HN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const time = now.toLocaleTimeString('es-HN', { hour: '2-digit', minute: '2-digit' });
+
+    const messages = [{ 
+      role: 'system', 
+      content: systemContext + `\n\nFecha actual: ${today}. Hora actual: ${time}.` 
+    }];
 
     if (historial && historial.length > 0) {
       const recent = historial.slice(-10);
